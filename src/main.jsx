@@ -463,7 +463,13 @@ function writeSavedProjects(projects) {
 }
 
 function parseProjectsBackup(value) {
-  const projects = Array.isArray(value) ? value : value?.projects;
+  const projects = Array.isArray(value)
+    ? value
+    : Array.isArray(value?.projects)
+      ? value.projects
+      : value?.project && value?.id
+        ? [value]
+        : null;
 
   if (!Array.isArray(projects)) {
     throw new Error('Το αρχείο δεν περιέχει έγκυρη λίστα έργων.');
@@ -486,6 +492,16 @@ function parseProjectsBackup(value) {
       updatedAt: savedProject.updatedAt || savedProject.createdAt || new Date().toISOString(),
     };
   });
+}
+
+function savedProjectIdentity(savedProject) {
+  const code = normalizeProject(savedProject.project).documentCode.trim().toLocaleLowerCase('el-GR');
+
+  if (code && code !== 'χωρίς κωδικό') {
+    return `code:${code}`;
+  }
+
+  return `id:${savedProject.id}`;
 }
 
 function row(cabinet, name, quantity, width, height, group, material = group, pvc = [0, 0]) {
@@ -1718,44 +1734,80 @@ function App() {
     }
   }
 
-  function exportProjectsBackup() {
+  function downloadProjectsBackup(projectsToExport, fileName) {
     const backup = {
       format: 'kitchen-projects-backup',
       version: 1,
       exportedAt: new Date().toISOString(),
-      projects: savedProjects,
+      projects: projectsToExport,
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' });
     const link = document.createElement('a');
-    const datePart = new Date().toISOString().slice(0, 10);
 
     link.href = URL.createObjectURL(blob);
-    link.download = `kitchen-projects-backup-${datePart}.json`;
+    link.download = `${sanitizeFileName(fileName)}.json`;
     document.body.appendChild(link);
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  }
+
+  function exportProjectsBackup() {
+    const datePart = new Date().toISOString().slice(0, 10);
+
+    downloadProjectsBackup(savedProjects, `kitchen-projects-backup-${datePart}`);
     showSaveMessage(`Εξήχθησαν ${savedProjects.length} έργα.`);
   }
 
+  function exportSingleProject(savedProject) {
+    const savedProjectInfo = normalizeProject(savedProject.project);
+    const documentLabel = savedProjectInfo.documentType === 'quote' ? 'prosfora' : 'paraggelia';
+    const code = savedProjectInfo.documentCode || savedProject.id;
+
+    downloadProjectsBackup(
+      [savedProject],
+      `${documentLabel}-${code}-${savedProjectInfo.customerName || 'project'}`,
+    );
+    showSaveMessage('Το έργο εξήχθη.');
+  }
+
   function commitProjectsImport(importedProjects, mode = 'replaceDuplicates') {
+    const existingIdentities = new Set(savedProjects.map(savedProjectIdentity));
     const existingIds = new Set(savedProjects.map((savedProject) => savedProject.id));
     let nextProjects;
 
     if (mode === 'addDuplicates') {
+      const usedIds = new Set(existingIds);
       nextProjects = [
-        ...importedProjects.map((savedProject) => (
-          existingIds.has(savedProject.id)
-            ? { ...savedProject, id: createId(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
-            : savedProject
-        )),
+        ...importedProjects.map((savedProject) => {
+          const isDuplicate = existingIdentities.has(savedProjectIdentity(savedProject)) || usedIds.has(savedProject.id);
+
+          if (!isDuplicate) {
+            usedIds.add(savedProject.id);
+            return savedProject;
+          }
+
+          const now = new Date().toISOString();
+          const copiedProject = {
+            ...savedProject,
+            id: createId(),
+            createdAt: now,
+            updatedAt: now,
+          };
+          usedIds.add(copiedProject.id);
+          return copiedProject;
+        }),
         ...savedProjects,
       ];
     } else {
+      const importedIdentities = new Set(importedProjects.map(savedProjectIdentity));
       const importedIds = new Set(importedProjects.map((savedProject) => savedProject.id));
       nextProjects = [
         ...importedProjects,
-        ...savedProjects.filter((savedProject) => !importedIds.has(savedProject.id)),
+        ...savedProjects.filter((savedProject) => (
+          !importedIds.has(savedProject.id)
+          && !importedIdentities.has(savedProjectIdentity(savedProject))
+        )),
       ];
     }
 
@@ -1776,8 +1828,10 @@ function App() {
     try {
       const parsedBackup = JSON.parse(await file.text());
       const importedProjects = parseProjectsBackup(parsedBackup);
-      const existingIds = new Set(savedProjects.map((savedProject) => savedProject.id));
-      const duplicateCount = importedProjects.filter((savedProject) => existingIds.has(savedProject.id)).length;
+      const existingIdentities = new Set(savedProjects.map(savedProjectIdentity));
+      const duplicateCount = importedProjects.filter((savedProject) => (
+        existingIdentities.has(savedProjectIdentity(savedProject))
+      )).length;
 
       if (duplicateCount > 0) {
         setPendingProjectImport({
@@ -1975,7 +2029,7 @@ function App() {
                 <div className="backupActions">
                   <button className="smallAction" type="button" onClick={exportProjectsBackup}>
                     <Download size={17} />
-                    Εξαγωγή έργων
+                    Εξαγωγή όλων
                   </button>
                   <button className="smallAction" type="button" onClick={() => projectImportInputRef.current?.click()}>
                     <FileUp size={17} />
@@ -2023,6 +2077,15 @@ function App() {
                       </p>
                     </div>
                     <div className="itemActions">
+                      <button
+                        className="textIconButton"
+                        type="button"
+                        onClick={() => exportSingleProject(savedProject)}
+                        title="Εξαγωγή έργου"
+                      >
+                        <Download size={17} />
+                        Εξαγωγή
+                      </button>
                       <button type="button" onClick={() => openProject(savedProject)} title="Άνοιγμα έργου">
                         <FolderOpen size={17} />
                       </button>
@@ -2044,10 +2107,10 @@ function App() {
                 </div>
                 <p>
                   Το αρχείο <strong>{pendingProjectImport.fileName}</strong> περιέχει{' '}
-                  <strong>{pendingProjectImport.duplicateCount}</strong> έργα που υπάρχουν ήδη.
+                  <strong>{pendingProjectImport.duplicateCount}</strong> έργα με κωδικό που υπάρχει ήδη.
                 </p>
                 <p>
-                  Η αντικατάσταση ενημερώνει μόνο τα ίδια έργα. Η προσθήκη κρατά και τις δύο εκδόσεις.
+                  Η αντικατάσταση ενημερώνει μόνο τα έργα με ίδιο κωδικό. Η δημιουργία αντιγράφου κρατά και τις δύο εκδόσεις.
                 </p>
                 <div className="importDialogActions">
                   <button className="secondary" type="button" onClick={() => setPendingProjectImport(null)}>
@@ -2058,8 +2121,8 @@ function App() {
                     type="button"
                     onClick={() => commitProjectsImport(pendingProjectImport.projects, 'addDuplicates')}
                   >
-                    <Plus size={17} />
-                    Προσθήκη
+                    <Copy size={17} />
+                    Δημιουργία αντιγράφου
                   </button>
                   <button
                     className="primary"
