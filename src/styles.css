@@ -124,6 +124,75 @@ button:disabled {
   margin-bottom: 16px;
 }
 
+.savedProjectsTools {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
+.backupActions,
+.importDialogActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.archiveMessage {
+  margin-bottom: 14px;
+}
+
+.modalBackdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(12, 18, 15, 0.58);
+}
+
+.importDialog {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 16px;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17211d;
+  padding: 24px;
+  box-shadow: 0 24px 70px rgba(8, 18, 14, 0.3);
+}
+
+.dark .importDialog {
+  background: #202522;
+  color: #eef3ec;
+}
+
+.importDialog h2,
+.importDialog p {
+  margin: 0;
+}
+
+.importDialogActions {
+  justify-content: flex-end;
+}
+
+.importDialogActions .secondary,
+.importDialogActions .primary {
+  flex: 0 1 auto;
+}
+
 .searchBox {
   align-items: center;
   background: #ffffff;
@@ -1099,8 +1168,27 @@ td:nth-child(4) {
   }
 
   .projectActions,
+  .savedProjectsTools,
+  .backupActions,
   .searchBox {
     width: 100%;
+  }
+
+  .savedProjectsTools {
+    justify-items: stretch;
+  }
+
+  .backupActions .smallAction {
+    flex: 1 1 160px;
+  }
+
+  .importDialogActions {
+    width: 100%;
+  }
+
+  .importDialogActions .secondary,
+  .importDialogActions .primary {
+    flex: 1 1 130px;
   }
 
   .projectActions .secondary,

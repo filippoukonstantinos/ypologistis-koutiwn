@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Copy,
+  Download,
   FileDown,
+  FileUp,
   FolderOpen,
   Moon,
   Pencil,
@@ -458,6 +460,32 @@ function readSavedProjects() {
 
 function writeSavedProjects(projects) {
   window.localStorage.setItem(storageKey, JSON.stringify(projects));
+}
+
+function parseProjectsBackup(value) {
+  const projects = Array.isArray(value) ? value : value?.projects;
+
+  if (!Array.isArray(projects)) {
+    throw new Error('Το αρχείο δεν περιέχει έγκυρη λίστα έργων.');
+  }
+
+  return projects.map((savedProject, index) => {
+    if (!savedProject || typeof savedProject !== 'object' || !savedProject.project) {
+      throw new Error(`Το έργο ${index + 1} δεν έχει έγκυρη μορφή.`);
+    }
+
+    return {
+      ...savedProject,
+      id: savedProject.id || createId(),
+      project: normalizeProject(savedProject.project),
+      sideAdditions: Array.isArray(savedProject.sideAdditions) ? savedProject.sideAdditions : [],
+      customPieces: Array.isArray(savedProject.customPieces) ? savedProject.customPieces : [],
+      cabinets: Array.isArray(savedProject.cabinets) ? savedProject.cabinets : [],
+      sheetSettings: savedProject.sheetSettings || initialSheetSettings,
+      createdAt: savedProject.createdAt || new Date().toISOString(),
+      updatedAt: savedProject.updatedAt || savedProject.createdAt || new Date().toISOString(),
+    };
+  });
 }
 
 function row(cabinet, name, quantity, width, height, group, material = group, pvc = [0, 0]) {
@@ -1384,6 +1412,8 @@ function App() {
   const [activeProjectId, setActiveProjectId] = useState(null);
   const [savedProjects, setSavedProjects] = useState([]);
   const [projectSearch, setProjectSearch] = useState('');
+  const [pendingProjectImport, setPendingProjectImport] = useState(null);
+  const projectImportInputRef = useRef(null);
   const [saveMessage, setSaveMessage] = useState('');
   const [cabinetForm, setCabinetForm] = useState(initialCabinet);
   const [cabinets, setCabinets] = useState([]);
@@ -1688,6 +1718,82 @@ function App() {
     }
   }
 
+  function exportProjectsBackup() {
+    const backup = {
+      format: 'kitchen-projects-backup',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      projects: savedProjects,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' });
+    const link = document.createElement('a');
+    const datePart = new Date().toISOString().slice(0, 10);
+
+    link.href = URL.createObjectURL(blob);
+    link.download = `kitchen-projects-backup-${datePart}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    showSaveMessage(`Εξήχθησαν ${savedProjects.length} έργα.`);
+  }
+
+  function commitProjectsImport(importedProjects, mode = 'replaceDuplicates') {
+    const existingIds = new Set(savedProjects.map((savedProject) => savedProject.id));
+    let nextProjects;
+
+    if (mode === 'addDuplicates') {
+      nextProjects = [
+        ...importedProjects.map((savedProject) => (
+          existingIds.has(savedProject.id)
+            ? { ...savedProject, id: createId(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+            : savedProject
+        )),
+        ...savedProjects,
+      ];
+    } else {
+      const importedIds = new Set(importedProjects.map((savedProject) => savedProject.id));
+      nextProjects = [
+        ...importedProjects,
+        ...savedProjects.filter((savedProject) => !importedIds.has(savedProject.id)),
+      ];
+    }
+
+    writeSavedProjects(nextProjects);
+    setSavedProjects(nextProjects);
+    setPendingProjectImport(null);
+    showSaveMessage(`Εισήχθησαν ${importedProjects.length} έργα.`);
+  }
+
+  async function importProjectsBackup(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    try {
+      const parsedBackup = JSON.parse(await file.text());
+      const importedProjects = parseProjectsBackup(parsedBackup);
+      const existingIds = new Set(savedProjects.map((savedProject) => savedProject.id));
+      const duplicateCount = importedProjects.filter((savedProject) => existingIds.has(savedProject.id)).length;
+
+      if (duplicateCount > 0) {
+        setPendingProjectImport({
+          projects: importedProjects,
+          duplicateCount,
+          fileName: file.name,
+        });
+        return;
+      }
+
+      commitProjectsImport(importedProjects, 'replaceDuplicates');
+    } catch (error) {
+      showSaveMessage(error instanceof Error ? error.message : 'Η εισαγωγή του αρχείου απέτυχε.');
+    }
+  }
+
   function createNextCabinetForm(previousForm = cabinetForm) {
     const layouts = getLayouts(previousForm.boxType);
     const hasLayout = layouts.some((layout) => layout.value === previousForm.frontType);
@@ -1865,17 +1971,37 @@ function App() {
                 <p className="eyebrow">Αρχείο έργων</p>
                 <h2>Αποθηκευμένες δουλειές</h2>
               </div>
-              <label className="searchBox">
-                <Search size={18} />
-                <input
-                  type="search"
-                  aria-label="Αναζήτηση πελάτη"
-                  placeholder="Αναζήτηση πελάτη"
-                  value={projectSearch}
-                  onChange={(event) => setProjectSearch(event.target.value)}
-                />
-              </label>
+              <div className="savedProjectsTools">
+                <div className="backupActions">
+                  <button className="smallAction" type="button" onClick={exportProjectsBackup}>
+                    <Download size={17} />
+                    Εξαγωγή έργων
+                  </button>
+                  <button className="smallAction" type="button" onClick={() => projectImportInputRef.current?.click()}>
+                    <FileUp size={17} />
+                    Εισαγωγή έργων
+                  </button>
+                  <input
+                    ref={projectImportInputRef}
+                    className="visuallyHidden"
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={importProjectsBackup}
+                  />
+                </div>
+                <label className="searchBox">
+                  <Search size={18} />
+                  <input
+                    type="search"
+                    aria-label="Αναζήτηση πελάτη"
+                    placeholder="Αναζήτηση πελάτη"
+                    value={projectSearch}
+                    onChange={(event) => setProjectSearch(event.target.value)}
+                  />
+                </label>
+              </div>
             </div>
+            {saveMessage && <p className="saveMessage archiveMessage">{saveMessage}</p>}
             <div className="savedProjectsList">
               {filteredProjects.length === 0 && (
                 <p className="emptyState">Δεν υπάρχουν αποθηκευμένα έργα.</p>
@@ -1909,6 +2035,44 @@ function App() {
               })}
             </div>
           </section>
+          {pendingProjectImport && (
+            <div className="modalBackdrop" role="presentation">
+              <section className="importDialog" role="dialog" aria-modal="true" aria-labelledby="import-dialog-title">
+                <div>
+                  <p className="eyebrow">Εισαγωγή έργων</p>
+                  <h2 id="import-dialog-title">Βρέθηκαν ίδια έργα</h2>
+                </div>
+                <p>
+                  Το αρχείο <strong>{pendingProjectImport.fileName}</strong> περιέχει{' '}
+                  <strong>{pendingProjectImport.duplicateCount}</strong> έργα που υπάρχουν ήδη.
+                </p>
+                <p>
+                  Η αντικατάσταση ενημερώνει μόνο τα ίδια έργα. Η προσθήκη κρατά και τις δύο εκδόσεις.
+                </p>
+                <div className="importDialogActions">
+                  <button className="secondary" type="button" onClick={() => setPendingProjectImport(null)}>
+                    Ακύρωση
+                  </button>
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={() => commitProjectsImport(pendingProjectImport.projects, 'addDuplicates')}
+                  >
+                    <Plus size={17} />
+                    Προσθήκη
+                  </button>
+                  <button
+                    className="primary"
+                    type="button"
+                    onClick={() => commitProjectsImport(pendingProjectImport.projects, 'replaceDuplicates')}
+                  >
+                    <RotateCcw size={17} />
+                    Αντικατάσταση
+                  </button>
+                </div>
+              </section>
+            </div>
+          )}
         </section>
       </main>
     );
