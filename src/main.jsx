@@ -2700,15 +2700,6 @@ function App() {
               </div>
             </section>
           ))}
-          <section className="supplierTotals">
-            <h3>Σύνολο κουτιών:</h3>
-            <p><strong>Βάσεως:</strong> {cabinetCategoryTotals.base} κουτιά</p>
-            <p><strong>Κρεμαστά:</strong> {cabinetCategoryTotals.wall} κουτιά</p>
-            <p><strong>Ντουλάπες:</strong> {cabinetCategoryTotals.wardrobe} κουτιά</p>
-            <p><strong>Συρταριέρες με κρυφό μηχανισμό:</strong> {cabinetCategoryTotals.wardrobeDrawer} κουτιά</p>
-            <p><strong>Συρταριέρες απλές:</strong> {cabinetCategoryTotals.simpleDrawer} κουτιά</p>
-            <p><strong>Συρταριέρες εξωτερικές:</strong> {cabinetCategoryTotals.externalDrawer} κουτιά</p>
-          </section>
         </section>
 
         <section className="printDocument sketchDocument">
